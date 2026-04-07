@@ -13,17 +13,32 @@ def get_db():
     finally:
         db.close()
 
+
 @router.post("/signup")
-def signup(name: str, email: str, password: str, role: str, db: Session = Depends(get_db)):
+def signup(
+    name: str,
+    email: str,
+    password: str,
+    role: str,
+    lat: float,
+    lng: float,
+    db: Session = Depends(get_db)
+):
     user = User(
         name=name,
         email=email,
         password=hash_password(password),
-        role=role
+        role=role,
+        lat=lat,
+        lng=lng,
+        status="pending"
     )
+
     db.add(user)
     db.commit()
-    return {"message": "User created"}
+
+    return {"message": "User created. Wait for admin approval"}
+
 
 @router.post("/login")
 def login(email: str, password: str, db: Session = Depends(get_db)):
@@ -31,5 +46,8 @@ def login(email: str, password: str, db: Session = Depends(get_db)):
 
     if not user or not verify_password(password, user.password):
         return {"error": "Invalid credentials"}
+
+    if user.status != "approved":
+        return {"error": "Waiting for admin approval"}
 
     return {"message": "Login success", "role": user.role, "user_id": user.id}

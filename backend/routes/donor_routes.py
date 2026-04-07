@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from database import SessionLocal
-from models import Donation
+from models import Donation, User
 
 router = APIRouter()
 
@@ -11,6 +11,7 @@ def get_db():
         yield db
     finally:
         db.close()
+
 
 @router.post("/donate")
 def create_donation(
@@ -22,6 +23,14 @@ def create_donation(
     lng: float,
     db: Session = Depends(get_db)
 ):
+    user = db.query(User).get(donor_id)
+
+    if not user or user.role != "donor":
+        return {"error": "Only donors allowed"}
+
+    if user.status != "approved":
+        return {"error": "Donor not approved"}
+
     donation = Donation(
         donor_id=donor_id,
         food_type=food_type,
