@@ -86,7 +86,7 @@ def calculate_org_score(org, donation):
 
     demand = org.required_quantity or 0
 
-    features = [[distance, demand]]
+    features = [[distance, 0, demand, 0]]
 
     try:
         ml_score = model.predict(features)[0]
@@ -152,7 +152,7 @@ def calculate_agent_score(agent, donation, quantity):
 
     capacity_ratio = quantity / agent.capacity
 
-    features = [[distance, capacity_ratio]]
+    features = [[distance, capacity_ratio, 0, 1]]
 
     try:
         ml_score = model.predict(features)[0]
