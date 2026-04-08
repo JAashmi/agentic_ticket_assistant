@@ -29,27 +29,41 @@ def agent_signup(
     db: Session = Depends(get_db)
 ):
 
-    # ✅ 1. CHECK FILE TYPE (ONLY IMAGE)
+    # 🔥 NEW: VALIDATE INPUTS
+    if capacity <= 0:
+        return {"error": "Capacity must be greater than 0"}
+
+    # ✅ 1. CHECK FILE TYPE
     if file.content_type not in ["image/jpeg", "image/png"]:
         return {"error": "Only JPG or PNG images are allowed"}
+
+    # 🔥 NEW: CREATE uploads folder
+    if not os.path.exists("uploads"):
+        os.makedirs("uploads")
 
     # ✅ 2. CREATE UNIQUE FILE NAME
     file_extension = file.filename.split(".")[-1]
     unique_name = f"{uuid.uuid4()}.{file_extension}"
     file_path = f"uploads/{unique_name}"
 
-    # ✅ 3. CREATE UPLOADS FOLDER IF NOT EXISTS
-    if not os.path.exists("uploads"):
-        os.makedirs("uploads")
-
-    # ✅ 4. SAVE FILE SAFELY
+    # ✅ 3. SAVE FILE
     try:
         with open(file_path, "wb") as f:
             f.write(file.file.read())
-    except Exception as e:
+    except Exception:
         return {"error": "File upload failed"}
 
-    # ✅ 5. CREATE AGENT (NO NAME DUPLICATE CHECK NEEDED)
+    # 🔥 NEW: PREVENT DUPLICATE AGENTS (OPTIONAL)
+    existing = db.query(DeliveryAgent).filter(
+        DeliveryAgent.name == name,
+        DeliveryAgent.lat == lat,
+        DeliveryAgent.lng == lng
+    ).first()
+
+    if existing:
+        return {"error": "Agent already registered at this location"}
+
+    # ✅ 4. CREATE AGENT
     agent = DeliveryAgent(
         name=name,
         lat=lat,
@@ -59,13 +73,14 @@ def agent_signup(
         verified="pending"
     )
 
-    # ✅ 6. SAVE TO DATABASE
+    # ✅ 5. SAVE
     db.add(agent)
     db.commit()
-    db.refresh(agent)   # get generated id
+    db.refresh(agent)
 
-    # ✅ 7. RESPONSE
+    # 🔥 NEW: RESPONSE IMPROVED
     return {
         "message": "Agent registered. Wait for admin approval",
-        "agent_id": agent.id
+        "agent_id": agent.id,
+        "status": agent.verified
     }
