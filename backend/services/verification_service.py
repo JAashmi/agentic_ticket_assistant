@@ -1,6 +1,17 @@
 import re
+from agents.fraud_agent import FraudAgent
+
+fraud_agent = FraudAgent()
+
 
 def validate_document(text, govt_id_input):
+    """
+    Hybrid verification:
+    1. Rule-based scoring
+    2. LLM fraud detection
+    """
+
+    # 🔹 STEP 1: RULE-BASED CHECK
     result = {
         "status": "fake",
         "confidence": 0.0
@@ -20,4 +31,22 @@ def validate_document(text, govt_id_input):
     if result["confidence"] >= 0.5:
         result["status"] = "valid"
 
-    return result
+    # 🔥 STEP 2: LLM FRAUD ANALYSIS
+    ai_result = fraud_agent.analyze_document(text, govt_id_input)
+
+    # 🔥 STEP 3: COMBINE RESULTS (VERY IMPORTANT)
+    final_status = result["status"]
+    final_confidence = (result["confidence"] + ai_result["confidence"]) / 2
+
+    # Priority: fake > suspicious > valid
+    if ai_result["status"] == "fake":
+        final_status = "fake"
+    elif ai_result["status"] == "suspicious":
+        final_status = "suspicious"
+    elif result["status"] == "valid":
+        final_status = "valid"
+
+    return {
+        "status": final_status,
+        "confidence": round(final_confidence, 2)
+    }

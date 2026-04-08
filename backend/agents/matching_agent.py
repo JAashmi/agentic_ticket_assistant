@@ -1,5 +1,10 @@
 from models import DeliveryAgent, Organization
-from services.matching_services import calculate_distance
+
+from services.matching_services import (
+    calculate_agent_score,
+    sort_organizations_by_priority,
+    filter_valid_agents
+)
 
 
 class MatchingAgent:
@@ -11,7 +16,7 @@ class MatchingAgent:
         """
         Main entry:
         1. Get valid organizations
-        2. Sort by distance
+        2. Sort by priority (distance + demand + ML)
         3. Split donation
         4. Assign best agents
         """
@@ -22,17 +27,11 @@ class MatchingAgent:
         ).all()
 
         if not organizations:
+            print("❌ No organizations available")
             return []
 
-        # 🔹 STEP 2: SORT BY DISTANCE
-        organizations.sort(
-            key=lambda org: calculate_distance(
-                donation.lat,
-                donation.lng,
-                org.lat,
-                org.lng
-            )
-        )
+        # 🔥 STEP 2: SMART SORT (HYBRID)
+        organizations = sort_organizations_by_priority(organizations, donation)
 
         remaining_quantity = donation.quantity
         results = []
@@ -45,20 +44,18 @@ class MatchingAgent:
 
             required = org.required_quantity or 0
 
-            # Skip if org doesn't need food
+            # ❌ Skip if no demand
             if required <= 0:
                 continue
 
             assigned_qty = min(remaining_quantity, required)
 
             # 🔹 STEP 4: FIND BEST AGENT
-            agent = self._find_best_agent(
-                donation,
-                assigned_qty
-            )
+            agent = self._find_best_agent(donation, assigned_qty)
 
             if not agent:
-                continue  # skip if no agent available
+                print(f"⚠️ No agent available for org {org.id}")
+                continue
 
             results.append({
                 "agent": agent,
@@ -72,39 +69,30 @@ class MatchingAgent:
 
     def _find_best_agent(self, donation, quantity):
         """
-        Find best delivery agent using scoring
+        Find best delivery agent using hybrid scoring
         """
 
         agents = self.db.query(DeliveryAgent).filter(
             DeliveryAgent.verified == "approved"
         ).all()
 
+        if not agents:
+            return None
+
+        # 🔥 FILTER VALID AGENTS
+        valid_agents = filter_valid_agents(agents, quantity)
+
+        if not valid_agents:
+            return None
+
         best_agent = None
         best_score = float("inf")
 
-        for agent in agents:
+        for agent in valid_agents:
 
-            # ❌ Skip if capacity not enough
-            if agent.capacity < quantity:
-                continue
+            # 🔥 HYBRID SCORING (RULE + ML)
+            score = calculate_agent_score(agent, donation, quantity)
 
-            # 🔹 Calculate distance
-            distance = calculate_distance(
-                donation.lat,
-                donation.lng,
-                agent.lat,
-                agent.lng
-            )
-
-            # 🔹 SCORING FUNCTION (VERY IMPORTANT 🔥)
-            capacity_ratio = quantity / agent.capacity
-
-            score = (
-                distance * 0.7 +         # distance weight
-                capacity_ratio * 0.3     # load efficiency
-            )
-
-            # 🔹 Select best
             if score < best_score:
                 best_score = score
                 best_agent = agent

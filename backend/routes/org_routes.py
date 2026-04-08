@@ -26,7 +26,7 @@ def get_db():
 def org_signup(
     name: str,
     govt_id_number: str,
-    required_quantity: int,   # 🔥 NEW (VERY IMPORTANT)
+    required_quantity: int,
     lat: float,
     lng: float,
     file: UploadFile = File(...),
@@ -41,54 +41,52 @@ def org_signup(
     if existing:
         return {"error": "Organization already exists with this Govt ID"}
 
-    # 🔥 NEW: VALIDATE REQUIRED QUANTITY
+    # ✅ 2. VALIDATE REQUIRED QUANTITY
     if required_quantity <= 0:
         return {"error": "Invalid required quantity"}
 
-    # ✅ 2. CHECK FILE TYPE
+    # ✅ 3. CHECK FILE TYPE
     if file.content_type != "application/pdf":
         return {"error": "Only PDF files are allowed"}
 
-    # 🔥 NEW: CREATE uploads folder if not exists
-    if not os.path.exists("uploads"):
-        os.makedirs("uploads")
+    # ✅ 4. CREATE UPLOAD FOLDER IF NOT EXISTS
+    upload_dir = "uploads/documents"
+    if not os.path.exists(upload_dir):
+        os.makedirs(upload_dir)
 
-    # ✅ 3. CREATE UNIQUE FILE NAME
+    # ✅ 5. CREATE UNIQUE FILE NAME
     unique_name = f"{uuid.uuid4()}.pdf"
-    file_path = f"uploads/{unique_name}"
+    file_path = os.path.join(upload_dir, unique_name)
 
-    # ✅ 4. SAVE FILE
+    # ✅ 6. SAVE FILE
     try:
         with open(file_path, "wb") as f:
             f.write(file.file.read())
     except Exception:
         return {"error": "File upload failed"}
 
-    # ✅ 5. AI VERIFICATION
+    # ✅ 7. OCR + FRAUD VERIFICATION (HYBRID 🔥)
     try:
         extracted_text = extract_text_from_pdf(file_path)
         ai_result = validate_document(extracted_text, govt_id_number)
     except Exception:
-        ai_result = {
-            "status": "error",
-            "confidence": 0.0
-        }
-
-    # 🔥 HANDLE OCR FAILURE
-    if ai_result["status"] == "error":
         return {"error": "Document processing failed"}
 
-    # 🔥 OPTIONAL: BLOCK FAKE DIRECTLY
+    # 🔥 HANDLE FRAUD RESULTS
+
     if ai_result["status"] == "fake":
         return {
             "error": "Document appears fake based on AI verification"
         }
 
-    # ✅ 6. SAVE TO DATABASE
+    if ai_result["status"] == "suspicious":
+        print("⚠️ Suspicious organization detected:", name)
+
+    # ✅ 8. SAVE TO DATABASE
     org = Organization(
         name=name,
         govt_id_number=govt_id_number,
-        required_quantity=required_quantity,   # 🔥 NEW
+        required_quantity=required_quantity,
         lat=lat,
         lng=lng,
         govt_proof=file_path,
@@ -101,7 +99,7 @@ def org_signup(
     db.commit()
     db.refresh(org)
 
-    # ✅ 7. RESPONSE
+    # ✅ 9. RESPONSE
     return {
         "message": "Organization submitted for approval",
         "org_id": org.id,
