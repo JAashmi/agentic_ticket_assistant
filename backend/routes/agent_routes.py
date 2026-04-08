@@ -3,13 +3,12 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import DeliveryAgent
 
-import uuid
-import os
+from utils.file_handler import FileHandler
+from utils.constants import FILE_TYPES, STATUS
 
 router = APIRouter()
 
 
-# 🔹 DATABASE CONNECTION
 def get_db():
     db = SessionLocal()
     try:
@@ -18,7 +17,6 @@ def get_db():
         db.close()
 
 
-# 🔹 AGENT SIGNUP
 @router.post("/signup")
 def agent_signup(
     name: str,
@@ -29,31 +27,23 @@ def agent_signup(
     db: Session = Depends(get_db)
 ):
 
-    # 🔥 NEW: VALIDATE INPUTS
     if capacity <= 0:
-        return {"error": "Capacity must be greater than 0"}
+        return {"error": "Invalid capacity"}
 
-    # ✅ 1. CHECK FILE TYPE
-    if file.content_type not in ["image/jpeg", "image/png"]:
-        return {"error": "Only JPG or PNG images are allowed"}
-
-    # 🔥 NEW: CREATE uploads folder
-    if not os.path.exists("uploads"):
-        os.makedirs("uploads")
-
-    # ✅ 2. CREATE UNIQUE FILE NAME
-    file_extension = file.filename.split(".")[-1]
-    unique_name = f"{uuid.uuid4()}.{file_extension}"
-    file_path = f"uploads/{unique_name}"
-
-    # ✅ 3. SAVE FILE
+    # 🔥 Use FileHandler
     try:
-        with open(file_path, "wb") as f:
-            f.write(file.file.read())
-    except Exception:
-        return {"error": "File upload failed"}
+        file_path = FileHandler.save_file(
+            file,
+            folder="uploads/images",
+            allowed_types=[
+                FILE_TYPES["IMAGE_JPG"],
+                FILE_TYPES["IMAGE_PNG"]
+            ]
+        )
+    except Exception as e:
+        return {"error": str(e)}
 
-    # 🔥 NEW: PREVENT DUPLICATE AGENTS (OPTIONAL)
+    # 🔹 Duplicate check
     existing = db.query(DeliveryAgent).filter(
         DeliveryAgent.name == name,
         DeliveryAgent.lat == lat,
@@ -61,26 +51,23 @@ def agent_signup(
     ).first()
 
     if existing:
-        return {"error": "Agent already registered at this location"}
+        return {"error": "Agent already exists"}
 
-    # ✅ 4. CREATE AGENT
     agent = DeliveryAgent(
         name=name,
         lat=lat,
         lng=lng,
         capacity=capacity,
         profile_image=file_path,
-        verified="pending"
+        verified=STATUS["PENDING"]
     )
 
-    # ✅ 5. SAVE
     db.add(agent)
     db.commit()
     db.refresh(agent)
 
-    # 🔥 NEW: RESPONSE IMPROVED
     return {
-        "message": "Agent registered. Wait for admin approval",
+        "message": "Agent registered",
         "agent_id": agent.id,
         "status": agent.verified
     }

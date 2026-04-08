@@ -4,18 +4,16 @@ from database import SessionLocal
 from models import Assignment, Donation
 
 from datetime import datetime
-import uuid
-import os
 
-# 🔥 AGENTS
+from utils.file_handler import FileHandler
+from utils.constants import FILE_TYPES, ASSIGNMENT_STATUS
+
 from agents.reassignment_agent import ReassignmentAgent
 from agents.communication_agent import CommunicationAgent
-
 
 router = APIRouter()
 
 
-# 🔹 DATABASE CONNECTION
 def get_db():
     db = SessionLocal()
     try:
@@ -24,27 +22,21 @@ def get_db():
         db.close()
 
 
-# 🔹 ACCEPT ASSIGNMENT
 @router.post("/accept")
 def accept_assignment(assignment_id: int, db: Session = Depends(get_db)):
 
     assignment = db.get(Assignment, assignment_id)
 
     if not assignment:
-        return {"error": "Assignment not found"}
+        return {"error": "Not found"}
 
-    # 🔥 Prevent invalid transitions
-    if assignment.status != "assigned":
-        return {"error": f"Cannot accept. Current status: {assignment.status}"}
+    if assignment.status != ASSIGNMENT_STATUS["ASSIGNED"]:
+        return {"error": "Invalid state"}
 
-    assignment.status = "accepted"
+    assignment.status = ASSIGNMENT_STATUS["ACCEPTED"]
     db.commit()
 
-    return {"message": "Assignment accepted"}
-    
-
-# 🔹 REJECT ASSIGNMENT (AUTO REASSIGN)
-
+    return {"message": "Accepted"}
 
 
 @router.post("/reject")
@@ -53,33 +45,29 @@ def reject_assignment(assignment_id: int, db: Session = Depends(get_db)):
     assignment = db.get(Assignment, assignment_id)
 
     if not assignment:
-        return {"error": "Assignment not found"}
+        return {"error": "Not found"}
 
-    # 🔥 VALID STATE CHECK
-    if assignment.status not in ["assigned", "accepted"]:
-        return {"error": f"Cannot reject. Current status: {assignment.status}"}
+    if assignment.status not in [
+        ASSIGNMENT_STATUS["ASSIGNED"],
+        ASSIGNMENT_STATUS["ACCEPTED"]
+    ]:
+        return {"error": "Invalid state"}
 
-    # 🔥 MARK AS REJECTED FIRST
-    assignment.status = "rejected"
+    assignment.status = ASSIGNMENT_STATUS["REJECTED"]
     db.commit()
 
-    # 🔥 REASSIGN SAME ASSIGNMENT
     reassignment_agent = ReassignmentAgent(db)
-    updated_assignment = reassignment_agent.run(assignment)
+    updated = reassignment_agent.run(assignment)
 
-    if not updated_assignment:
-        return {
-            "message": "Assignment rejected, but no alternative agent found"
-        }
+    if not updated:
+        return {"message": "Rejected, no replacement"}
 
     return {
-        "message": "Assignment reassigned successfully",
-        "assignment_id": updated_assignment.id,
-        "new_agent_id": updated_assignment.agent_id
+        "message": "Reassigned",
+        "new_agent_id": updated.agent_id
     }
 
 
-# 🔹 COMPLETE DELIVERY (UPLOAD PROOF + AI REPORT)
 @router.post("/complete")
 def complete_delivery(
     assignment_id: int,
@@ -90,57 +78,40 @@ def complete_delivery(
     assignment = db.get(Assignment, assignment_id)
 
     if not assignment:
-        return {"error": "Assignment not found"}
+        return {"error": "Not found"}
 
-    # 🔥 Only accepted assignments can be completed
-    if assignment.status != "accepted":
-        return {"error": f"Cannot complete. Current status: {assignment.status}"}
+    if assignment.status != ASSIGNMENT_STATUS["ACCEPTED"]:
+        return {"error": "Invalid state"}
 
-    # 🔥 FILE TYPE CHECK
-    if file.content_type not in ["image/jpeg", "image/png"]:
-        return {"error": "Only JPG or PNG images allowed"}
-
-    # 🔥 CREATE UPLOAD FOLDER
-    if not os.path.exists("uploads"):
-        os.makedirs("uploads")
-
-    # 🔥 SAVE FILE
-    file_path = f"uploads/{uuid.uuid4()}.jpg"
-
+    # 🔥 Use FileHandler
     try:
-        with open(file_path, "wb") as f:
-            f.write(file.file.read())
-    except Exception:
-        return {"error": "File upload failed"}
+        file_path = FileHandler.save_file(
+            file,
+            folder="uploads/images",
+            allowed_types=[
+                FILE_TYPES["IMAGE_JPG"],
+                FILE_TYPES["IMAGE_PNG"]
+            ]
+        )
+    except Exception as e:
+        return {"error": str(e)}
 
-    # 🔥 UPDATE STATUS
-    assignment.status = "completed"
+    assignment.status = ASSIGNMENT_STATUS["COMPLETED"]
     assignment.delivery_proof = file_path
     assignment.delivered_at = datetime.utcnow()
 
     db.commit()
 
-    # 🔥 GENERATE AI REPORT
     donation = db.get(Donation, assignment.donation_id)
 
     comm_agent = CommunicationAgent()
-
     report = comm_agent.generate_report(
         donation=donation,
         assignments=[assignment]
     )
 
     return {
-        "message": "Delivery completed successfully",
+        "message": "Completed",
         "proof": file_path,
-        "ai_report": report
+        "report": report
     }
-
-
-# 🔹 GET ALL ASSIGNMENTS (FOR DEBUG / FRONTEND)
-@router.get("/list")
-def get_assignments(db: Session = Depends(get_db)):
-
-    assignments = db.query(Assignment).all()
-
-    return assignments
